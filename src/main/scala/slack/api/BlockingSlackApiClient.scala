@@ -352,6 +352,10 @@ class BlockingSlackApiClient(token: String, duration: FiniteDuration = 5.seconds
     resolve(client.getUserInfo(userId))
   }
 
+  def getUserInfoByEmail(email: String)(implicit system: ActorSystem): User = {
+    resolve(client.getUserInfoByEmail(email))
+  }
+
   def listUsers()(implicit system: ActorSystem): Seq[User] = {
     resolve(client.listUsers())
   }

@@ -59,6 +59,11 @@ case class MessageWithSubtype (
  messageSubType: MessageSubtype
 ) extends SlackEvent
 
+case class PongMessage(
+  timestamp: Long,
+  reply_to: Long
+) extends SlackEvent
+
 sealed trait MessageSubtype {
   def subtype: String
 }

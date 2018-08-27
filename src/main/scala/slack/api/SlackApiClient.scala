@@ -605,6 +605,11 @@ class SlackApiClient(token: String) {
     extract[User](res, "user")
   }
 
+  def getUserInfoByEmail(email: String)(implicit system: ActorSystem): Future[User] = {
+    val res = makeApiMethodRequest("users.lookupByEmail", "email" -> email)
+    extract[User](res, "user")
+  }
+
   def listUsers()(implicit system: ActorSystem): Future[Seq[User]] = {
     val res = makeApiMethodRequest("users.list")
     extract[Seq[User]](res, "members")
