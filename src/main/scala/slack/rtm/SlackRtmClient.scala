@@ -30,6 +30,7 @@ class SlackRtmClient(token: String, duration: FiniteDuration = 5.seconds)(implic
   val state = RtmState(apiClient.startRealTimeMessageSession())
   private val actor = SlackRtmConnectionActor(token, state, duration)
 
+
   def onEvent(f: (SlackEvent) => Unit): ActorRef = {
     val handler = EventHandlerActor(f)
     addEventListener(handler)
@@ -44,6 +45,10 @@ class SlackRtmClient(token: String, duration: FiniteDuration = 5.seconds)(implic
 
   def sendMessage(channelId: String, text: String, thread_ts: Option[String] = None): Future[Long] = {
     (actor ? SendMessage(channelId, text, thread_ts)).mapTo[Long]
+  }
+
+  def sendPing(): Unit = {
+    actor ! PingMessage
   }
 
   def editMessage(channelId: String, ts: String, text: String) {
@@ -76,15 +81,17 @@ private[rtm] object SlackRtmConnectionActor {
   implicit val sendMessageFmt = Json.format[MessageSend]
   implicit val botEditMessageFmt = Json.format[BotEditMessage]
   implicit val typingMessageFmt = Json.format[MessageTyping]
+  implicit val pingMessageFmt = Json.format[MessagePing]
 
   case class AddEventListener(listener: ActorRef)
   case class RemoveEventListener(listener: ActorRef)
   case class SendMessage(channelId: String, text: String, ts_thread: Option[String] = None)
-  case class BotEditMessage(channelId: String, ts: String, text: String, as_user: Boolean = true, `type`:String = "chat.update")
+  case class BotEditMessage(channelId: String, ts: String, text: String, as_user: Boolean = true, `type`: String = "chat.update")
   case class TypingMessage(channelId: String)
   case class StateRequest()
   case class StateResponse(state: RtmState)
   case object ReconnectWebSocket
+  case object PingMessage
 
   def apply(token: String, state: RtmState, duration: FiniteDuration)(implicit arf: ActorRefFactory): ActorRef = {
     arf.actorOf(Props(new SlackRtmConnectionActor(token, state, duration)))
@@ -98,6 +105,17 @@ private[rtm] class SlackRtmConnectionActor(token: String, state: RtmState, durat
   val apiClient = BlockingSlackApiClient(token, duration)
   val listeners = MSet[ActorRef]()
   val idCounter = new AtomicLong(1L)
+
+  system.scheduler.schedule(10.seconds, 15.seconds)({
+    try {
+      self ! PingMessage
+    } catch {
+      case t: Throwable =>
+        log.error("[SlackRtmClient] Error while send ping {}, reconnecting...", t.getMessage)
+        //reconnecting
+        self ! ReconnectWebSocket
+    }
+  })
 
   override val supervisorStrategy =
     OneForOneStrategy(maxNrOfRetries = 10, withinTimeRange = 1.minute) {
@@ -142,6 +160,11 @@ private[rtm] class SlackRtmConnectionActor(token: String, state: RtmState, durat
     case AddEventListener(listener) =>
       listeners += listener
       context.watch(listener)
+    case PingMessage =>
+      val nextId = idCounter.getAndIncrement
+      val payload = Json.stringify(Json.toJson(MessagePing(nextId, System.currentTimeMillis())))
+      log.info("[SlackRtmConnectionActor] Ping WebSocket Client")
+      webSocketClient.get ! SendWSMessage(TextMessage(payload))
     case RemoveEventListener(listener) =>
       listeners -= listener
     case WebSocketClientConnected =>
@@ -197,3 +220,4 @@ private[rtm] class SlackRtmConnectionActor(token: String, state: RtmState, durat
 
 private[rtm] case class MessageSend(id: Long, channel: String, text: String, thread_ts: Option[String] = None, `type`: String = "message")
 private[rtm] case class MessageTyping(id: Long, channel: String, `type`: String = "typing")
+private[rtm] case class MessagePing(id: Long, timestamp: Long, `type`: String = "ping")
